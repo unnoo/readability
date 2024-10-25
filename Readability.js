@@ -139,7 +139,11 @@ Readability.prototype = {
     // Readability-readerable.js. Please keep both copies in sync.
     unlikelyCandidates:
       /-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|footer|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
-    okMaybeItsACandidate: /and|article|body|column|content|main|shadow/i,
+    okMaybeItsACandidate: /and|article|body|column|content|main|shadow|hljs-|katex-/i,
+
+    ignoreCleanClassesWhitelist: /^(hljs|katex)(-.*)?$/i,
+    stylePreserveClassCandidates: /katex-/i,
+    ignoreCleanStylesWhitelist: /^(hljs|katex)(-.*)?$/i,
 
     positive:
       /article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story/i,
@@ -151,7 +155,7 @@ Readability.prototype = {
     replaceFonts: /<(\/?)font[^>]*>/gi,
     normalize: /\s{2,}/g,
     videos:
-      /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|v\.qq)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)/i,
+      /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|mpvideo|v\.qq)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)|.cn/i,
     shareElements: /(\b|_)(share|sharedaddy)(\b|_)/i,
     nextLink: /(next|weiter|continue|>([^\|]|$)|»([^\|]|$))/i,
     prevLink: /(prev|earl|old|new|<|«)/i,
@@ -208,7 +212,6 @@ Readability.prototype = {
     "frame",
     "hspace",
     "rules",
-    "style",
     "valign",
     "vspace",
   ],
@@ -416,9 +419,19 @@ Readability.prototype = {
    */
   _cleanClasses(node) {
     var classesToPreserve = this._classesToPreserve;
+    var ignoreCleanClassesWhitelist = this.REGEXPS.ignoreCleanClassesWhitelist
+    var hasWhitelistClass = false
+
     var className = (node.getAttribute("class") || "")
       .split(/\s+/)
-      .filter(cls => classesToPreserve.includes(cls))
+      .filter(cls => {
+        if (ignoreCleanClassesWhitelist.test(cls)) {
+          hasWhitelistClass = true
+          return true
+        }
+
+        return classesToPreserve.includes(cls)
+      })
       .join(" ");
 
     if (className) {
@@ -427,7 +440,9 @@ Readability.prototype = {
       node.removeAttribute("class");
     }
 
-    for (node = node.firstElementChild; node; node = node.nextElementSibling) {
+
+
+    for (node = !hasWhitelistClass ? node.firstElementChild : null; node; node = node.nextElementSibling) {
       this._cleanClasses(node);
     }
   },
@@ -825,6 +840,11 @@ Readability.prototype = {
     this._cleanConditionally(articleContent, "ul");
     this._cleanConditionally(articleContent, "div");
 
+    this._replaceNodeTags(
+      this._getAllNodesWithTag(articleContent, ["slax-mark"]),
+      "span"
+    );
+
     // replace H1 with H2 as H1 should be only title that is displayed separately
     this._replaceNodeTags(
       this._getAllNodesWithTag(articleContent, ["h1"]),
@@ -1060,9 +1080,11 @@ Readability.prototype = {
         var matchString = node.className + " " + node.id;
 
         if (!this._isProbablyVisible(node)) {
-          this.log("Removing hidden node - " + matchString);
-          node = this._removeAndGetNext(node);
-          continue;
+          if (!this._haveAllowedVideoTag(node)) {
+            this.log("Removing hidden node - " + matchString);
+            node = this._removeAndGetNext(node);
+            continue;
+          }
         }
 
         // User is not able to see elements applied with both "aria-modal = true" and "role = dialog"
@@ -2058,7 +2080,12 @@ Readability.prototype = {
       e.removeAttribute("height");
     }
 
-    var cur = e.firstElementChild;
+    if (!this.REGEXPS.stylePreserveClassCandidates.test(e.className)) {
+      e.removeAttribute('style')
+    }
+
+    const ignore = this.REGEXPS.ignoreCleanStylesWhitelist.test(e.className);
+    var cur = !ignore ? e.firstElementChild : null;
     while (cur !== null) {
       this._cleanStyles(cur);
       cur = cur.nextElementSibling;
@@ -2438,6 +2465,11 @@ Readability.prototype = {
         return false;
       }
 
+      const iframe = e.querySelector('iframe')
+      if (iframe && this._allowedVideoRegex.test(iframe.src)) {
+        return false
+      }
+
       var weight = this._getClassWeight(node);
 
       this.log("Cleaning Conditionally", node);
@@ -2454,6 +2486,7 @@ Readability.prototype = {
         // ominous signs, remove the element.
         var p = node.getElementsByTagName("p").length;
         var img = node.getElementsByTagName("img").length;
+        var video = node.getElementsByTagName('video').length
         var li = node.getElementsByTagName("li").length - 100;
         var input = node.getElementsByTagName("input").length;
         var headingDensity = this._getTextDensity(node, [
@@ -2552,9 +2585,9 @@ Readability.prototype = {
               `Suspicious embed. (embedCount=${embedCount}, contentLength=${contentLength})`
             );
           }
-          if (img === 0 && textDensity === 0) {
+          if (img === 0 && textDensity === 0 && video === 0) {
             errs.push(
-              `No useful content. (img=${img}, textDensity=${textDensity})`
+              `No useful content. (img=${img}, textDensity=${textDensity}, video=${video})`
             );
           }
 
@@ -2587,6 +2620,11 @@ Readability.prototype = {
       }
       return false;
     });
+  },
+
+  _haveAllowedVideoTag(e) {
+    const videos = Array.from(e.querySelectorAll('video')) || []
+    return !!videos.find(video => this._allowedVideoRegex.test(video.getAttribute('src')))
   },
 
   /**

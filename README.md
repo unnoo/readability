@@ -12,6 +12,15 @@ npm install @mozilla/readability
 
 You can then `require()` it, or for web-based projects, load the `Readability.js` script from your webpage.
 
+## FYI
+
+拉取Readability实现自定义功能：
+1. 增加clean class的统一白名单
+2. 独立了style的处理，增加对style去除忽略的白名单
+3. 保留highlights代码块中的元素
+4. 调整了video的正则
+5. 保留带视频src的iframe
+
 ## Basic usage
 
 To parse a document, you must create a new `Readability` object from a DOM document object, and then call the [`parse()`](#parse) method. Here's an example:
